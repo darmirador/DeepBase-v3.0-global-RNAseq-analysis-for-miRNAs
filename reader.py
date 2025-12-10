@@ -26,12 +26,27 @@ def parse_args():
 
 
 def cancer_type_from_filename(filename: str) -> str:
+    """
+    Extract cancer type from filenames such as:
+        metafile_UVM.sampleID.csv → UVM
+        metafile_LUAD.csv → LUAD
+    Always return only the cancer code before any dot.
+    """
     base = os.path.basename(filename)
+
+    # strip "metafile"
     if base.startswith("metafile"):
         base = base[len("metafile"):]
     if base.startswith("_"):
         base = base[1:]
-    return os.path.splitext(base)[0]
+
+    # remove final .csv
+    core = os.path.splitext(base)[0]
+
+    # remove anything after FIRST dot (e.g., .sampleID)
+    core = core.split(".")[0]
+
+    return core
 
 
 def significance_from_p(p: float) -> str:
@@ -57,7 +72,7 @@ def main():
 
     meta_files = [f for f in os.listdir(pathname) if f.startswith("metafile")]
 
-    # SUMMARY FILE (per miRNA)
+    # summary file (hsa-mir-490.csv)
     summary_path = base_dir / f"{mirnaName}.csv"
     with summary_path.open("w", newline="") as summary_fh:
         summary_writer = csv.writer(summary_fh)
@@ -73,10 +88,9 @@ def main():
             ]
         )
 
-        # PROCESS EACH METAFILE
+        # process each metafile
         for filename in meta_files:
 
-            # --- READ & EXTRACT DATA --- #
             tcgaId = []
             expressionLevel = []
             tcgaIdSubset = []
@@ -95,7 +109,6 @@ def main():
                 print(f"[WARNING] {mirnaName} not in {filename}; skipping.")
                 continue
 
-            # RPM columns only
             for i in range(len(tcgaId)):
                 if tcgaId[i].endswith("rpm"):
                     tcgaIdSubset.append(tcgaId[i])
@@ -116,15 +129,21 @@ def main():
 
                 if sampleTypeString in ("01", "02"):
                     cancerSample.sampleId.append(barcode[:28])
-                    cancerSample.normalizedTranscripts.append(expressionLevelSubset[counter])
+                    cancerSample.normalizedTranscripts.append(
+                        expressionLevelSubset[counter]
+                    )
                 elif sampleTypeString == "11":
                     normalSample.sampleId.append(barcode[:28])
-                    normalSample.normalizedTranscripts.append(expressionLevelSubset[counter])
+                    normalSample.normalizedTranscripts.append(
+                        expressionLevelSubset[counter]
+                    )
                 counter += 1
 
-            # --- PER-CANCER OUTPUT CSV --- #
+            # correct cancer type
             cancer_type = cancer_type_from_filename(filename)
-            out_name = f"{mirnaName}_{cancer_type}.csv"    # << NEW FORMAT HERE
+
+            # filename format: hsa-mir-490-output_LUAD.csv
+            out_name = f"{mirnaName}-output_{cancer_type}.csv"
             out_path = base_dir / out_name
 
             with out_path.open("w") as csvOutput:
@@ -133,16 +152,18 @@ def main():
             with out_path.open("a") as csvOutput:
                 for i in range(len(normalSample.sampleId)):
                     csvOutput.write(
-                        f"normal,{normalSample.sampleId[i]},{normalSample.normalizedTranscripts[i]}\n"
+                        f"normal,{normalSample.sampleId[i]},"
+                        f"{normalSample.normalizedTranscripts[i]}\n"
                     )
                 for i in range(len(cancerSample.sampleId)):
                     csvOutput.write(
-                        f"cancer,{cancerSample.sampleId[i]},{cancerSample.normalizedTranscripts[i]}\n"
+                        f"cancer,{cancerSample.sampleId[i]},"
+                        f"{cancerSample.normalizedTranscripts[i]}\n"
                     )
 
             print(f"Saved per-cancer file: {out_name}")
 
-            # --- SUMMARY STATS --- #
+            # summary statistics
             def clean(arr):
                 vals = []
                 for x in arr:
@@ -158,7 +179,9 @@ def main():
             if len(normal_vals) > 1 and len(cancer_vals) > 1:
                 normal_mean = float(np.mean(normal_vals))
                 cancer_mean = float(np.mean(cancer_vals))
-                t_stat, p_val = stats.ttest_ind(normal_vals, cancer_vals, equal_var=False)
+                t_stat, p_val = stats.ttest_ind(
+                    normal_vals, cancer_vals, equal_var=False
+                )
                 sig_level = significance_from_p(p_val)
             else:
                 normal_mean = np.nan
